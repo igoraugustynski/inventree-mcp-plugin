@@ -19,7 +19,7 @@ class InvenTreeMCPPlugin(UrlsMixin, SettingsMixin, InvenTreePlugin):  # type: ig
     DESCRIPTION = "Exposes InvenTree data via Model Context Protocol (MCP)"
     VERSION = PLUGIN_VERSION
     AUTHOR = "eljefedelrodeodeljefe"
-    MIN_VERSION = "0.18.0"
+    MIN_VERSION = "1.4.0"
 
     SETTINGS: ClassVar[dict[str, Any]] = {
         "REQUIRE_AUTH": {

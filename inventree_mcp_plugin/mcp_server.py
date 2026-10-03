@@ -21,8 +21,11 @@ from .tools.combinatory import stock as _combinatory_stock  # noqa: E402, F401
 from .tools.simple import bom as _bom  # noqa: E402, F401
 from .tools.simple import builds as _builds  # noqa: E402, F401
 from .tools.simple import categories as _categories  # noqa: E402, F401
+from .tools.simple import category_parameters as _category_parameters  # noqa: E402, F401
 from .tools.simple import locations as _locations  # noqa: E402, F401
 from .tools.simple import orders as _orders  # noqa: E402, F401
+from .tools.simple import parameters as _parameters  # noqa: E402, F401
 from .tools.simple import parts as _parts  # noqa: E402, F401
+from .tools.simple import selection_lists as _selection_lists  # noqa: E402, F401
 from .tools.simple import stock as _stock  # noqa: E402, F401
 from .tools.simple import tags as _tags  # noqa: E402, F401

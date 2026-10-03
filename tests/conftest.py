@@ -37,6 +37,10 @@ def _stub_inventree_modules(monkeypatch: pytest.MonkeyPatch) -> None:
         "django",
         "django.db",
         "django.db.models",
+        "django.db.utils",
+        "django.contrib",
+        "django.contrib.contenttypes",
+        "django.contrib.contenttypes.models",
         "django.http",
         "django.urls",
         "django.views",
@@ -68,11 +72,16 @@ def _stub_inventree_modules(monkeypatch: pytest.MonkeyPatch) -> None:
     django_q = MagicMock()
     stubs["django.db.models"].Q = django_q  # type: ignore[attr-defined]
     stubs["django.db.models"].Sum = MagicMock()  # type: ignore[attr-defined]
+    stubs["django.db"].transaction = MagicMock()  # type: ignore[attr-defined]
+    stubs["django.db.utils"].IntegrityError = type("IntegrityError", (Exception,), {})  # type: ignore[attr-defined]
+    stubs["django.contrib.contenttypes.models"].ContentType = MagicMock()  # type: ignore[attr-defined]
 
     # InvenTree model stubs
     for mod_name in [
         "part",
         "part.models",
+        "common",
+        "common.models",
         "stock",
         "stock.models",
         "order",
@@ -87,7 +96,18 @@ def _stub_inventree_modules(monkeypatch: pytest.MonkeyPatch) -> None:
     # Add placeholder model classes so monkeypatch.setattr works
     stubs["part.models"].Part = MagicMock()  # type: ignore[attr-defined]
     stubs["part.models"].PartCategory = MagicMock()  # type: ignore[attr-defined]
+    stubs["part.models"].PartCategoryParameterTemplate = MagicMock()  # type: ignore[attr-defined]
     stubs["part.models"].BomItem = MagicMock()  # type: ignore[attr-defined]
+    stubs["common.models"].Parameter = MagicMock()  # type: ignore[attr-defined]
+    stubs["common.models"].ParameterTemplate = MagicMock()  # type: ignore[attr-defined]
+    stubs["common.models"].SelectionList = MagicMock()  # type: ignore[attr-defined]
+    stubs["common.models"].SelectionListEntry = MagicMock()  # type: ignore[attr-defined]
+    template_class = stubs["common.models"].ParameterTemplate  # type: ignore[attr-defined]
+    _make_fluent_qs(template_class)
+    template_class.objects.get.return_value.model_type_id = None
+    template_class.objects.get.return_value.selectionlist_id = None
+    template_class.objects.get.return_value.enabled = True
+    template_class.objects.get.return_value.pk = 3
     stubs["stock.models"].StockItem = MagicMock()  # type: ignore[attr-defined]
     stubs["stock.models"].StockLocation = MagicMock()  # type: ignore[attr-defined]
     stubs["order.models"].PurchaseOrder = MagicMock()  # type: ignore[attr-defined]
@@ -120,15 +140,61 @@ def _make_fluent_qs(mock_cls: MagicMock) -> MagicMock:
         "values",
         "annotate",
         "values_list",
+        "select_for_update",
     ):
         getattr(qs, method).return_value = qs
     # Direct objects.* entry-points (tools that skip .all())
     mock_cls.objects.only.return_value = qs
     mock_cls.objects.filter.return_value = qs
     mock_cls.objects.order_by.return_value = qs
+    mock_cls.objects.select_related.return_value = qs
+    mock_cls.objects.select_for_update.return_value = qs
     # alias qs.get → objects.get so both code paths use the same mock
     qs.get = mock_cls.objects.get
     return qs
+
+
+@pytest.fixture()
+def mock_parameter_class(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Provide a mock generic Parameter model class."""
+    mock_cls = MagicMock()
+    _make_fluent_qs(mock_cls)
+    monkeypatch.setattr("common.models.Parameter", mock_cls)
+    return mock_cls
+
+
+@pytest.fixture()
+def mock_parameter_template_class(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Provide a mock generic ParameterTemplate model class."""
+    mock_cls = MagicMock()
+    _make_fluent_qs(mock_cls)
+    mock_cls.objects.get.return_value.selectionlist_id = None
+    monkeypatch.setattr("common.models.ParameterTemplate", mock_cls)
+    return mock_cls
+
+
+@pytest.fixture()
+def mock_selection_list_class(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    mock_cls = MagicMock()
+    _make_fluent_qs(mock_cls)
+    monkeypatch.setattr("common.models.SelectionList", mock_cls)
+    return mock_cls
+
+
+@pytest.fixture()
+def mock_selection_list_entry_class(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    mock_cls = MagicMock()
+    _make_fluent_qs(mock_cls)
+    monkeypatch.setattr("common.models.SelectionListEntry", mock_cls)
+    return mock_cls
+
+
+@pytest.fixture()
+def mock_category_parameter_template_class(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    mock_cls = MagicMock()
+    _make_fluent_qs(mock_cls)
+    monkeypatch.setattr("part.models.PartCategoryParameterTemplate", mock_cls)
+    return mock_cls
 
 
 @pytest.fixture()

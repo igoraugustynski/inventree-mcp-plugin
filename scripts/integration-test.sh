@@ -109,9 +109,9 @@ _install_plugin() {
     # Install the mcp package into the running containers, activate the plugin,
     # then restart so InvenTree registers the plugin URLs.
     echo "Installing mcp package in containers..."
-    $COMPOSE exec -T inventree-server pip install 'mcp>=1.9' --quiet
+    $COMPOSE exec -T inventree-server pip install 'mcp>=1.9,<2' --quiet
     # Worker may still be starting up; installation is best-effort
-    $COMPOSE exec -T inventree-worker pip install 'mcp>=1.9' --quiet 2>/dev/null || true
+    $COMPOSE exec -T inventree-worker pip install 'mcp>=1.9,<2' --quiet 2>/dev/null || true
 
     echo "Activating MCP plugin and enabling plugin URLs in InvenTree database..."
     $COMPOSE exec -T inventree-server sh -c "
@@ -252,18 +252,18 @@ cmd_smoke() {
     fi
 
     # --- Test 3: Authenticated tools/list ---
-    echo -n "3. tools/list returns 28 tools... "
+    echo -n "3. tools/list returns 52 tools... "
     resp=$(curl -sf -X POST "${MCP_URL}" -H "$ct" -H "$accept" -H "$auth" \
         -d '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' 2>&1) || true
-    if echo "$resp" | python3 -c "import sys,json; d=json.load(sys.stdin); assert len(d['result']['tools']) == 28" 2>/dev/null; then
+    if echo "$resp" | python3 -c "import sys,json; d=json.load(sys.stdin); assert len(d['result']['tools']) == 52" 2>/dev/null; then
         _smoke_pass; pass=$((pass + 1))
     else
         local tool_count
         tool_count=$(echo "$resp" | python3 -c "import sys,json; print(len(json.load(sys.stdin).get('result',{}).get('tools',[])))" 2>/dev/null || echo "?")
-        _smoke_fail "got ${tool_count} tools — expected 28"; fail=$((fail + 1))
+        _smoke_fail "got ${tool_count} tools - expected 52"; fail=$((fail + 1))
     fi
 
-    # --- Tests 4–12: tools/call for every domain ---
+    # --- Tests 4-17: tools/call for every domain ---
     _smoke_call() {
         local num="$1" label="$2" tool="$3" args="$4"
         echo -n "${num}. tools/call ${label}... "
@@ -280,14 +280,41 @@ cmd_smoke() {
     }
 
     _smoke_call  4 "list_parts"           list_parts           '{"limit":5}'
+    local part_id
+    part_id=$(echo "$resp" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+items = d['result']['structuredContent']['result']
+print(items[0]['id'] if items else '')
+" 2>/dev/null) || part_id=""
     _smoke_call  5 "search_parts"         search_parts         '{"query":"r","limit":5}'
     _smoke_call  6 "list_categories"      list_categories      '{"limit":5}'
+    local category_id
+    category_id=$(echo "$resp" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+items = d['result']['structuredContent']['result']
+print(items[0]['id'] if items else '')
+" 2>/dev/null) || category_id=""
     _smoke_call  7 "list_stock_items"     list_stock_items     '{"limit":5}'
     _smoke_call  8 "list_locations"       list_locations       '{"limit":5}'
     _smoke_call  9 "list_purchase_orders" list_purchase_orders '{"limit":5}'
     _smoke_call 10 "list_sales_orders"    list_sales_orders    '{"limit":5}'
     _smoke_call 11 "list_build_orders"    list_build_orders    '{"limit":5}'
     _smoke_call 12 "list_bom_items"       list_bom_items       '{"limit":5}'
+    _smoke_call 13 "list_parameter_templates" list_parameter_templates '{"limit":5}'
+    if [ -n "$part_id" ]; then
+        _smoke_call 14 "list_part_parameters" list_part_parameters "{\"part_id\":${part_id},\"limit\":5}"
+    else
+        _smoke_fail "No part ID available for list_part_parameters"; fail=$((fail + 1))
+    fi
+    _smoke_call 15 "list_selection_lists" list_selection_lists '{"limit":5}'
+    _smoke_call 16 "list_category_parameter_templates" list_category_parameter_templates '{"limit":5}'
+    if [ -n "$category_id" ]; then
+        _smoke_call 17 "list_category_parameters" list_category_parameters "{\"category_id\":${category_id},\"limit\":5}"
+    else
+        _smoke_fail "No category ID available for list_category_parameters"; fail=$((fail + 1))
+    fi
 
     # --- Summary ---
     echo ""

@@ -12,6 +12,7 @@ MCP (Model Context Protocol) server plugin for [InvenTree](https://inventree.org
 - **BOM**: View bill of materials for assemblies
 - **Builds**: View build orders
 - **Tags**: List and search part tags
+- **Parameters**: Manage shared templates and selection lists, category defaults and values, and part parameter values
 
 ## Installation
 
@@ -24,6 +25,8 @@ Or with uv:
 ```bash
 uv pip install inventree-mcp-plugin
 ```
+
+Parameter tools require InvenTree 1.4.0 or later. Generic parameter models were introduced in 1.2.0, but category-owned parameter support requires the `PartCategory` mixin available in 1.4.0.
 
 ## Configuration
 
@@ -56,15 +59,15 @@ Unauthenticated requests receive a JSON-RPC error response with HTTP 401.
 
 ### User Setup and Permissions
 
-The plugin accesses InvenTree data through the Django ORM using the permissions of the authenticated user. InvenTree uses a role-based permission system: users belong to **groups**, and each group has **rule sets** that grant `view`, `add`, `change`, and `delete` permissions across 9 role categories.
+InvenTree uses a role-based permission system: users belong to **groups**, and each group has **rule sets** that grant `view`, `add`, `change`, and `delete` permissions across role categories. The tables below describe the intended permissions for each operation.
 
-**Important:** The plugin currently bypasses InvenTree's `RolePermission` checks because it uses the ORM directly rather than the REST API. This means any authenticated user can access all tools regardless of their role assignments. For production use, create a dedicated service account with appropriate group membership to establish a clear permission boundary.
+**Important:** The plugin uses the Django ORM directly and currently bypasses InvenTree `RolePermission` checks. The intended permissions are not enforced: an authenticated endpoint credential can access every registered tool, including mutation tools, regardless of group membership or read-only role assignments. Restrict endpoint credentials to trusted writers. Parameter model and record filtering selects records; it is not authorization.
 
 #### Recommended user profiles
 
 Create these groups and users via the InvenTree Admin Center (**Settings > Admin Center > Groups**):
 
-**Read-only MCP user** — for AI assistants that only need to query data:
+**Read-only MCP user** — intended for AI assistants that only need to query data (not enforced by the plugin):
 
 | Role | view | add | change | delete |
 |------|------|-----|--------|--------|
@@ -76,12 +79,12 @@ Create these groups and users via the InvenTree Admin Center (**Settings > Admin
 | Purchase Order | yes | | | |
 | Sales Order | yes | | | |
 
-**Read-write MCP user** — for AI assistants that also create/modify data:
+**Read-write MCP user** — intended for AI assistants that also create/modify data (not enforced by the plugin):
 
 | Role | view | add | change | delete |
 |------|------|-----|--------|--------|
 | Part | yes | yes | yes | |
-| Part Category | yes | | | |
+| Part Category | yes | yes | yes | |
 | Stock Item | yes | | yes | |
 | Stock Location | yes | | | |
 | Build | yes | | | |
@@ -135,6 +138,15 @@ curl -s http://your-inventree-instance/api/user/token/ \
 | `list_bom_items`, `get_bom_for_part` | Part | view |
 | `list_build_orders`, `get_build_order` | Build | view |
 | `list_tags`, `search_tags` | — | view |
+| `list_parameter_templates`, `get_parameter_template` | Part | view |
+| `create_parameter_template`, `update_parameter_template` | Part, Part Category | add/change, as applicable to the template target |
+| `list_selection_lists`, `get_selection_list`, `list_selection_list_entries`, `get_selection_list_entry` | Part, Part Category | view |
+| `create_selection_list`, `update_selection_list`, `create_selection_list_entry`, `update_selection_list_entry` | Part, Part Category | add/change |
+| `list_part_parameters`, `get_part_parameter` | Part | view |
+| `create_part_parameter` | Part | add |
+| `update_part_parameter` | Part | change |
+| `list_category_parameter_templates`, `get_category_parameter_template`, `list_category_parameters`, `get_category_parameter` | Part Category | view |
+| `create_category_parameter_template`, `update_category_parameter_template`, `create_category_parameter`, `update_category_parameter` | Part Category | add/change |
 
 ##### Combinatory tools
 
@@ -337,6 +349,55 @@ Common prompts to use once the MCP is connected to your AI assistant. Paste them
 | `list_tags` | List all tags |
 | `search_tags` | Search tags by name |
 
+#### Parameters
+
+| Tool | Description |
+|------|-------------|
+| `list_parameter_templates` | List generic or target-specific templates, with target and enabled-status filters |
+| `get_parameter_template` | Get a parameter template by ID |
+| `create_parameter_template` | Create a generic, part, or part-category template |
+| `update_parameter_template` | Update template metadata without changing its target model |
+| `list_selection_lists`, `get_selection_list` | List or get a selection list |
+| `create_selection_list`, `update_selection_list` | Create or update a selection list |
+| `list_selection_list_entries`, `get_selection_list_entry` | List or get entries in a selection list |
+| `create_selection_list_entry`, `update_selection_list_entry` | Create or update a selection-list entry |
+| `list_part_parameters` | List parameters for a part, optionally filtered by template |
+| `get_part_parameter` | Get a part parameter by ID |
+| `create_part_parameter` | Create a validated parameter value for a part and template |
+| `update_part_parameter` | Update a parameter value and/or note |
+| `list_category_parameter_templates`, `get_category_parameter_template` | List or get direct category-to-template assignments |
+| `create_category_parameter_template`, `update_category_parameter_template` | Create an assignment or update its default value |
+| `list_category_parameters`, `get_category_parameter` | List or get a category's own parameter values |
+| `create_category_parameter`, `update_category_parameter` | Create or update a category's own parameter value |
+
+### Parameter interface and compatibility
+
+The IDs in these examples are illustrative.
+
+1. Create a selection list, then an entry: `create_selection_list(name="Voltage class")`, followed by `create_selection_list_entry(selection_list_id=10, value="5", label="5 V")`. Read them back with `get_selection_list(selection_list_id=10)` and `list_selection_list_entries(selection_list_id=10)`.
+2. Link that list to a part template: `create_parameter_template(name="Nominal voltage", selection_list_id=10, model_type="part.part")`. Template output includes resolved `choices`, raw `choices_raw`, and its `selection_list` ID.
+3. Assign the template to category `20` with a default for parts created by InvenTree: `create_category_parameter_template(category_id=20, template_id=42, default_value="5")`. `list_category_parameter_templates(category_id=20)` shows direct assignments only, not assignments inherited from ancestor categories. `get_category_parameter_template` and `update_category_parameter_template` identify the mapping by `assignment_id`; the update tool changes only `default_value`.
+4. Create a direct part value after checking for an existing one: `list_part_parameters(part_id=123, template_id=42)`, then `create_part_parameter(part_id=123, template_id=42, data="5", note="nominal")`. Update the returned parameter `456` with `update_part_parameter(parameter_id=456, note="verified")`.
+5. Category-owned values are separate from category-template assignments. Create a category-scoped template with `create_parameter_template(name="Storage temperature", model_type="part.partcategory")`, then create a value with `create_category_parameter(category_id=20, template_id=43, data="25")`.
+
+List tools default to `limit=100` and `offset=0`, accept an optional `fields` projection, and return records directly rather than an upstream paginated envelope. Returned records retain repository-style `id` keys. Template discovery defaults to `model_type="part.part"`, includes generic templates, and returns enabled templates unless `enabled=None` includes disabled ones. Templates may target generic (`None`), `part.part`, or `part.partcategory`; the stable-only unique field is not exposed.
+
+Creating a part or category value requires nonempty `data` and an enabled generic or resource-specific template. Disabled templates cannot create values, but existing applicable values using them can be updated. There is no category-default inference when creating parameter values, and duplicates are errors rather than upserts. Updates preserve omitted fields; `note=""` clears a note. InvenTree host validation (`full_clean`) and normal saves apply to every create and update.
+
+Selection lists have editable name, description, active state, and default entry. A `default_entry_id` must be an active entry in the same list; `clear_default=True` detaches it. A current default entry cannot be deactivated until the default is changed or cleared. Entries have editable value, label, description, and active state, but cannot move to another list. Locked lists reject list and entry writes. Updating a list never implicitly replaces its entries. A newly linked selection list must be active. Template validation rejects combining inline `choices` with a selection list, or `checkbox` with a selection list. Template updates preserve their immutable target model and can detach a linked list with `clear_selection_list=True`; they cannot combine that flag with `selection_list_id`.
+
+Nonempty category-template assignment defaults are checked against the template's effective choices and InvenTree unit validation; blank defaults are allowed. Category-template defaults are distinct from category-owned values. On newer InvenTree hosts that expose a nonzero template `unique` value, category-template assignment creates and updates are rejected because upstream does not copy those defaults; existing assignments remain readable. InvenTree 1.4.0 does not expose this field.
+
+Templates and selection lists are shared metadata: edits affect all linked records but do not migrate or rewrite existing parameter values or defaults. Changes to choices, entry values or active state, units, or checkbox settings can therefore leave existing data or defaults invalid. Inspect affected values before changing shared metadata. InvenTree's numeric recalculation is best effort and asynchronous: its signal can be queued before an outer transaction commits and may not see new changes. No deletion tools are provided.
+
+Parameter writes are not attributed to the authenticated user because these tools have no `request.user` context; InvenTree host saves retain their timestamp behavior.
+
+Generic parameter models were introduced in [InvenTree 1.2.0](https://github.com/inventree/InvenTree/blob/1.2.0/src/backend/InvenTree/common/models.py); category-owned parameters require the [InvenTree 1.4.0 `PartCategory` mixin](https://github.com/inventree/InvenTree/blob/1.4.0/src/backend/InvenTree/part/models.py#L71-L78). The implementation follows the [official InvenTree MCP parameter tool reference](https://github.com/inventree/inventree-mcp/blob/c1dcdfa8ab73479e647a87f3e6b69d440feb0dce/inventree_mcp/tools/parameters.py).
+
+### Parameter verification
+
+The current implementation passed 390 unit tests, mypy, Ruff, and integration-script shell syntax and diff checks. Docker was unavailable, so live-host integration remains unverified. Before release validation, run the integration smoke test against InvenTree 1.4.0 and the current stable release, then exercise create/read/edit of linked selection lists, category values, cleanup, and ideally host category-deletion cascade behavior.
+
 ### Combinatory — multi-resource operations
 
 | Tool | Description |
@@ -403,7 +464,7 @@ The `up` command seeds InvenTree's [demo dataset](https://github.com/inventree/d
 |----------|----------|---------|
 | `admin` | `inventree` | Superuser — full access, use for admin tasks |
 | `mcp-service` | `mcp-service` | MCP service account — assign roles via Admin Center |
-| `mcp-readonly` | `mcp-readonly` | No roles — use to verify permission denials |
+| `mcp-readonly` | `mcp-readonly` | No roles — demonstrates that roles do not restrict MCP tools |
 | `allaccess` | `nolimits` | Demo user — full permissions |
 | `reader` | `readonly` | Demo user — view only |
 
