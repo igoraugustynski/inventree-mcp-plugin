@@ -78,6 +78,8 @@ def _stub_inventree_modules(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # InvenTree model stubs
     for mod_name in [
+        "InvenTree",
+        "InvenTree.helpers",
         "part",
         "part.models",
         "common",
@@ -92,6 +94,8 @@ def _stub_inventree_modules(monkeypatch: pytest.MonkeyPatch) -> None:
         "taggit.models",
     ]:
         add_stub(mod_name)
+
+    stubs["InvenTree.helpers"].current_date = MagicMock()  # type: ignore[attr-defined]
 
     # Add placeholder model classes so monkeypatch.setattr works
     stubs["part.models"].Part = MagicMock()  # type: ignore[attr-defined]

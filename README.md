@@ -5,7 +5,7 @@ MCP (Model Context Protocol) server plugin for [InvenTree](https://inventree.org
 ## Features
 
 - **Parts**: List, search, create, and update parts
-- **Stock**: List, adjust, and transfer stock items
+- **Stock**: List, create, edit, adjust, and transfer stock items
 - **Locations**: Browse stock location hierarchy
 - **Categories**: Browse part category hierarchy
 - **Orders**: View purchase and sales orders
@@ -85,7 +85,7 @@ Create these groups and users via the InvenTree Admin Center (**Settings > Admin
 |------|------|-----|--------|--------|
 | Part | yes | yes | yes | |
 | Part Category | yes | yes | yes | |
-| Stock Item | yes | | yes | |
+| Stock Item | yes | yes | yes | |
 | Stock Location | yes | | | |
 | Build | yes | | | |
 | Purchase Order | yes | | | |
@@ -129,6 +129,8 @@ curl -s http://your-inventree-instance/api/user/token/ \
 | `create_part` | Part, Part Category | add (part), view (category) |
 | `update_part` | Part | change |
 | `list_stock_items`, `get_stock_item` | Stock Item | view |
+| `create_stock_item` | Stock Item, Part, Stock Location | add (stock), view (part and location) |
+| `update_stock_item` | Stock Item | change |
 | `adjust_stock` | Stock Item | change |
 | `transfer_stock` | Stock Item, Stock Location | change (stock), view (location) |
 | `list_locations`, `get_location`, `get_location_tree` | Stock Location | view |
@@ -305,6 +307,8 @@ Common prompts to use once the MCP is connected to your AI assistant. Paste them
 |------|-------------|
 | `list_stock_items` | List stock items with optional filters |
 | `get_stock_item` | Get detailed stock item information |
+| `create_stock_item` | Create one stock item for a part |
+| `update_stock_item` | Edit supported stock-item metadata |
 | `adjust_stock` | Add or remove stock quantity |
 | `transfer_stock` | Transfer stock to a different location |
 
@@ -370,6 +374,26 @@ Common prompts to use once the MCP is connected to your AI assistant. Paste them
 | `list_category_parameters`, `get_category_parameter` | List or get a category's own parameter values |
 | `create_category_parameter`, `update_category_parameter` | Create or update a category's own parameter value |
 
+### Stock-item create and edit interface
+
+`create_stock_item` and `update_stock_item` intentionally do not provide stock splitting, merging, deletion, or bulk serial creation. Use `adjust_stock` for quantity changes and `transfer_stock` for location changes. Default and host-behavior compatibility follows the [InvenTree 1.4 stock API](https://github.com/inventree/InvenTree/blob/1.4.0/src/backend/InvenTree/stock/api.py#L1113-L1307).
+
+Create requires `part_id` and `quantity`. `quantity` accepts a finite, non-negative `float` or decimal string; prefer a decimal string when exact input precision matters. Fractional quantities remain subject to host part tracking rules. `location_id` defaults to the part's default location when omitted. Optional create fields are `serial`, `batch`, `status`, `notes`, `packaging`, `link`, `expiry_date`, and `delete_on_deplete`.
+
+- `serial` is optional. A supplied serial creates exactly one serialized stock item, requires a trackable part and quantity exactly `1`, and does not expand a quantity into multiple serials. The host's serial-edit setting also applies.
+- `batch=None` omits the model argument, preserving the host batch generator. `batch=""` supplies an explicit blank value.
+- `status` is an optional integer and is validated through the host's checked status setter. Unknown statuses are rejected.
+- `notes`, `packaging`, and `link` are strings and default to `""`. `expiry_date` is either `None` or a strict `YYYY-MM-DD` date. When expiry is omitted, the host infers it as the current date plus a positive part default expiry, or leaves it unset otherwise.
+- `delete_on_deplete` defaults to `false`; deletion is never automatic by default. Serialized items reject `delete_on_deplete=true`.
+
+Update accepts `stock_item_id` and only `serial`, `batch`, `status`, `notes`, `packaging`, `link`, `expiry_date`, `clear_expiry_date`, and `delete_on_deplete`. Omitted values are preserved; `""` clears a supported string field. `clear_expiry_date=true` conflicts with an explicit expiry date, and an update with no changes is rejected. Assigning a nonempty serial requires the current quantity to be exactly `1`, preventing a quantity-changing `0` to `1` side effect. Part, quantity, location, lifecycle, and provenance fields cannot be changed by this tool.
+
+Create responses and `get_stock_item` include `packaging`, `link`, `expiry_date`, `delete_on_deplete`, and exact `quantity_decimal`, while retaining the legacy `quantity` float for compatibility. Consumers needing exact values should use `quantity_decimal`; the legacy float can round. Other stock read interfaces retain their existing output contracts.
+
+Compact workflow: `create_stock_item(part_id=123, quantity='10.25', location_id=5, notes='opening balance')` is illustrative only for a part that permits fractional, non-serialized stock. Then use `update_stock_item(stock_item_id=<id>, notes='counted', expiry_date='2027-01-01')`, `get_stock_item(stock_item_id=<id>)` to read the expanded fields, `transfer_stock` to move the item, and `adjust_stock` to change its quantity.
+
+Stock creates and edits use the host's existing status, `full_clean()`, save-hook, and stock-tracking behavior. They have no `request.user` context for stock tracking, so user attribution and metadata-edit tracking must not be assumed. They do not add supplier pack-size handling, bulk-serial behavior, or provenance foreign-key changes. Any per-part lock serializes only cooperating plugin writers for the same exact part; it does not coordinate REST writers, variant or global uniqueness, or make the operation generally race-safe.
+
 ### Parameter interface and compatibility
 
 The IDs in these examples are illustrative.
@@ -394,9 +418,9 @@ Parameter writes are not attributed to the authenticated user because these tool
 
 Generic parameter models were introduced in [InvenTree 1.2.0](https://github.com/inventree/InvenTree/blob/1.2.0/src/backend/InvenTree/common/models.py); category-owned parameters require the [InvenTree 1.4.0 `PartCategory` mixin](https://github.com/inventree/InvenTree/blob/1.4.0/src/backend/InvenTree/part/models.py#L71-L78). The implementation follows the [official InvenTree MCP parameter tool reference](https://github.com/inventree/inventree-mcp/blob/c1dcdfa8ab73479e647a87f3e6b69d440feb0dce/inventree_mcp/tools/parameters.py).
 
-### Parameter verification
+### Verification
 
-The current implementation passed 390 unit tests, mypy, Ruff, and integration-script shell syntax and diff checks. Docker was unavailable, so live-host integration remains unverified. Before release validation, run the integration smoke test against InvenTree 1.4.0 and the current stable release, then exercise create/read/edit of linked selection lists, category values, cleanup, and ideally host category-deletion cascade behavior.
+Unit, schema, MCP-argument, static, and integration-script checks passed. Docker was unavailable, so live-host validation remains unverified. Before release, run the [documented test commands](#development) and the integration smoke test against InvenTree 1.4.0 and the current stable release. Exercise stock create/read/edit defaults, serial rules, tracking, and MPTT behavior; live-host checks have not established rollback, serial-race, duplicate-plugin-hook, or audit behavior. Also exercise create/read/edit of linked selection lists, category values, cleanup, and ideally host category-deletion cascade behavior.
 
 ### Combinatory — multi-resource operations
 

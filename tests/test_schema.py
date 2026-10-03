@@ -45,6 +45,8 @@ _EXPECTED_TOOLS: dict[str, set[str]] = {
     # Stock
     "list_stock_items": set(),
     "get_stock_item": {"stock_item_id"},
+    "create_stock_item": {"part_id", "quantity"},
+    "update_stock_item": {"stock_item_id"},
     "adjust_stock": {"stock_item_id", "quantity"},
     "transfer_stock": {"stock_item_id", "location_id"},
     # Locations
@@ -90,6 +92,38 @@ def registered_tools() -> dict[str, object]:
 
 
 class TestToolRegistry:
+    @pytest.mark.parametrize(
+        "name,properties",
+        [
+            (
+                "create_stock_item",
+                "part_id quantity location_id serial batch status notes packaging link expiry_date delete_on_deplete",
+            ),
+            (
+                "update_stock_item",
+                "stock_item_id serial batch status notes packaging link expiry_date "
+                "clear_expiry_date delete_on_deplete",
+            ),
+        ],
+    )
+    def test_stock_write_signatures(self, name: str, properties: str, registered_tools: dict) -> None:
+        schema = registered_tools[name].parameters
+        assert set(schema["properties"]) == set(properties.split())
+        assert set(schema["required"]) == _EXPECTED_TOOLS[name]
+        for key, prop in schema["properties"].items():
+            types = {p["type"] for p in prop.get("anyOf", [prop])}
+            if key == "quantity":
+                assert types == {"number", "string"}
+            elif key.endswith("_id") or key == "status":
+                assert "integer" in types
+            elif key in {"clear_expiry_date", "delete_on_deplete"}:
+                assert "boolean" in types
+            else:
+                assert "string" in types
+            if key not in _EXPECTED_TOOLS[name]:
+                assert "default" in prop
+        assert len(registered_tools) == 54
+
     @pytest.mark.parametrize(
         "name,properties",
         [

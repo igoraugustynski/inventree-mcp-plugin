@@ -1,5 +1,5 @@
 from collections.abc import Iterator
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Generic, TypeVar
 
@@ -23,6 +23,8 @@ class _QuerySet(Generic[_T]):
     def __getitem__(self, index: int | slice) -> Any: ...
 
 class _Manager(Generic[_T]):
+    def select_for_update(self) -> _QuerySet[_T]: ...
+    def values_list(self, *fields: str, **kwargs: Any) -> _QuerySet[Any]: ...
     def all(self) -> _QuerySet[_T]: ...
     def filter(self, *args: Any, **kwargs: Any) -> _QuerySet[_T]: ...
     def only(self, *fields: str) -> _QuerySet[_T]: ...
@@ -41,10 +43,11 @@ class StockLocation:
     objects: _Manager[StockLocation]
 
 class StockItem:
+    def __init__(self, **kwargs: Any) -> None: ...
     pk: int
     part_id: int
     part: Part
-    quantity: float
+    quantity: Decimal
     location_id: int | None
     location: StockLocation | None
     serial: str | None
@@ -52,7 +55,14 @@ class StockItem:
     status: int
     notes: str
     updated: datetime
+    packaging: str
+    link: str
+    expiry_date: date | None
+    delete_on_deplete: bool
     objects: _Manager[StockItem]
+    def set_status(self, status: int) -> bool: ...
+    def full_clean(self) -> None: ...
+    def save(self, *, user: Any = ...) -> None: ...
     def add_stock(self, quantity: Decimal, user: Any, notes: str = ...) -> bool: ...
     def take_stock(self, quantity: Decimal, user: Any, notes: str = ...) -> bool: ...
     def move(self, location: StockLocation, notes: str, user: Any) -> bool: ...
